@@ -1,0 +1,2 @@
+add_executable(TestExpandedMatrixRank TestExpandedMatrixRank.cpp)
+target_link_libraries(TestExpandedMatrixRank PRIVATE libproject)
