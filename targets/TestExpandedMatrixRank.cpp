@@ -80,26 +80,14 @@ void TestHDivOptimized(int kFacet) {
   h1.Initialize(ids, h1orders, dataH1);
   int nshape_std = hdiv_std.NShapeF(dataHDiv);
   int nshape_opt = hdiv_opt.NShapeF(dataHDivOptimized);
-  int nshape_const = hdiv_const.NHDivShapeF(dataHDivConst);
-  int nshape_cust = nshape_opt;
+  int nshape_cust = nshape_std;
   int nshape_h1 = 9; //h1.NShapeF(dataH1);
-
-  int nfacet_std = 0, nfacet_opt = 0, nfacet_const = 0;
-  for (int i = 0; i < TSHAPE::NFacets; i++) {
-    nfacet_std += hdiv_std.NConnectShapeF(i, dataHDiv);
-    nfacet_opt += hdiv_opt.NConnectShapeF(i, dataHDivOptimized);
-    nfacet_const += hdiv_const.NConnectShapeF(i, dataHDivConst);
-  }
-  
-  int nvol_std = hdiv_std.NConnectShapeF(TSHAPE::NFacets, dataHDiv);
-  int nvol_opt = hdiv_opt.NConnectShapeF(TSHAPE::NFacets, dataHDivOptimized);
-  int nvol_const = hdiv_const.NConnectShapeF(TSHAPE::NFacets, dataHDivConst);
 
   constexpr int dim = TSHAPE::Dimension;
   TPZFMatrix<REAL> phi_std(dim, nshape_std, 0.), phi_opt(dim, nshape_opt, 0.);
-  TPZFMatrix<REAL> phi_const(dim, nshape_const, 0.), phi_cust(dim, nshape_cust, 0.);
+  TPZFMatrix<REAL> phi_cust(dim, nshape_cust, 0.);
   TPZFNMatrix<60, REAL> div_std(nshape_std, 1), div_opt(nshape_opt, 1);
-  TPZFNMatrix<60, REAL> div_const(nshape_const, 1), div_cust(nshape_cust, 1);
+  TPZFNMatrix<60, REAL> div_cust(nshape_cust, 1);
   TPZFMatrix<REAL> phi_h1(nshape_h1, 1, 0.);
   TPZFMatrix<REAL> dphi_h1(dim, nshape_h1, 0.);
   typename TSHAPE::IntruleType intrule(3);
@@ -118,7 +106,6 @@ void TestHDivOptimized(int kFacet) {
     intrule.Point(ip, point, weight);
     hdiv_std.Shape(point, dataHDiv, phi_std, div_std);
     hdiv_opt.Shape(point, dataHDivOptimized, phi_opt, div_opt);
-    hdiv_const.Shape(point, dataHDivConst, phi_const, div_const);
     h1.Shape(point, dataH1, phi_h1, dphi_h1);
 
     // TODO: Build phi_cust and div_cust here! Maybe using a function
@@ -149,6 +136,6 @@ void TestHDivOptimized(int kFacet) {
   Mcust.Substitution(&Mstd_cust_t); 
   TPZFMatrix<REAL> Res2 = Mstd - Mstd_cust * Mstd_cust_t;
 
-  std::cout << "\nIs deRham compatible? " << Res1.MatrixNorm(2, 10, 1.e-10) << std::endl;
-  std::cout << "Does it span the same polynomial space? " << Res2.MatrixNorm(2, 10, 1.e-10) << "\n" << std::endl;
+  std::cout << "\nIs de Rham compatible? " << Res1.MatrixNorm(1, 10, 1.e-10) << std::endl;
+  std::cout << "Does it span the same polynomial space? " << Res2.MatrixNorm(1, 10, 1.e-10) << "\n" << std::endl;
 }
