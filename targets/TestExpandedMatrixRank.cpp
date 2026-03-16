@@ -58,9 +58,11 @@ template <class TSHAPE>
 void filterEquations(TPZVec<int> &filteredIndices, int kFacet);
 
 int main(int argc, char **argv) {
-  int kFacet = 3;
-  TestHDivOptimized<pzshape::TPZShapeCube>(kFacet);
-  // TestHDivOptimized<pzshape::TPZShapeQuad>(kFacet);
+  int kFacet = 2;
+  TestHDivOptimized<pzshape::TPZShapeQuad>(kFacet);
+  // TestHDivOptimized<pzshape::TPZShapeCube>(kFacet);
+  // TestHDivOptimized<pzshape::TPZShapeTriang>(kFacet);
+  // TestHDivOptimized<pzshape::TPZShapeTetra>(kFacet);
 }
 
 template <class TSHAPE>
@@ -158,15 +160,13 @@ void TestHDivOptimized(int kFacet) {
   
   // TODO: Check with gi. Maybe cleaner way to do it
   TPZFMatrix<REAL> Mdiv_h1_t;
-  Mh1.Decompose_LU();
   Mdiv_h1.Transpose(&Mdiv_h1_t);
-  Mh1.Substitution(&Mdiv_h1_t); 
+  Mh1.SolveDirect(Mdiv_h1_t, ELDLt); 
   TPZFMatrix<REAL> Res1 = Mdiv - Mdiv_h1 * Mdiv_h1_t;
 
   TPZFMatrix<REAL> Mdiv_filtered_h1_t;
-  Mh1_filtered.Decompose_LU();
   Mdiv_filtered_h1.Transpose(&Mdiv_filtered_h1_t);
-  Mh1_filtered.Substitution(&Mdiv_filtered_h1_t); 
+  Mh1_filtered.SolveDirect(Mdiv_filtered_h1_t, ELDLt);
   TPZFMatrix<REAL> Res2 = Mdiv_filtered - Mdiv_filtered_h1 * Mdiv_filtered_h1_t;
 
   std::cout << "\n------------------------------" << std::endl;
@@ -235,10 +235,111 @@ void filterEquations(TPZVec<int> &filteredIndices, int kFacet) {
       nFiltered++;
       count++;
     }
+
+  } else if (TSHAPE::Type() == EQuadrilateral) {
+    filteredIndices.Resize((kFacet+1)*(kFacet+1)-1);
+    filteredIndices.Fill(-1);
+    count = TSHAPE::NFacets * (kFacet + 1); // Skip trace functions
+    std::cout << "Count after trace functions: " << count << std::endl;
+
+    // Pick edge functions of the first 3 edges
+    for (int i = 0; i < 3; i++) {
+      for (int j = 0; j < kFacet; j++) {
+        filteredIndices[nFiltered] = count;
+        nFiltered++;
+        count++;
+      }
+    }
+
+    count += kFacet; // Skip the final edge
+
+    std::cout << "Count after edges: " << count << "   nFiltered after edges: " << nFiltered << std::endl;
+
+    // Pick the functions of the first direction of the face
+    for (int j = 0; j < kFacet * (kFacet - 1); j++) {
+      filteredIndices[nFiltered] = count;
+      nFiltered++;
+      count++;
+    }
+
+    std::cout << "Count after faces: " << count << "  nFiltered after faces: " << nFiltered << std::endl;
+
+  } else if (TSHAPE::Type() == ETriangle) {
+    filteredIndices.Resize((kFacet+1)*(kFacet+2)/2-1);
+    filteredIndices.Fill(-1);
+    count = TSHAPE::NFacets * (kFacet + 1); // Skip trace functions
+    std::cout << "Count after trace functions: " << count << std::endl;
+
+    // Pick edge functions of the first 2 edges
+    for (int i = 0; i < 2; i++) {
+      for (int j = 0; j < kFacet; j++) {
+        filteredIndices[nFiltered] = count;
+        nFiltered++;
+        count++;
+      }
+    }
+
+    count += kFacet; // Skip the final edge
+
+    std::cout << "Count after edges: " << count << "   nFiltered after edges: " << nFiltered << std::endl;
+
+    // Pick the functions of the first direction of the face
+    for (int j = 0; j < kFacet * (kFacet - 1) / 2; j++) {
+      filteredIndices[nFiltered] = count;
+      nFiltered++;
+      count++;
+    }
+
+    std::cout << "Count after faces: " << count << "  nFiltered after faces: " << nFiltered << std::endl;
+
+  } else if (TSHAPE::Type() == ETetraedro) {
+    filteredIndices.Resize((kFacet+3)*(kFacet+2)*(kFacet+1)/6-1);
+    filteredIndices.Fill(-1);
+    count = TSHAPE::NFacets * (kFacet + 2) * (kFacet + 1) / 2; // Skip trace functions
+    std::cout << "Count after trace functions: " << count << std::endl;
+
+    // Pick edge functions of the first 3 edges, skipping  the 2th one.
+    for (int i = 0; i < 4; i++) {
+      if (i == 2) {
+        count += kFacet;
+        continue;
+      }
+      for (int j = 0; j < kFacet; j++) {
+        filteredIndices[nFiltered] = count;
+        nFiltered++;
+        count++;
+      }
+    }
+
+    count += 2*kFacet; // Skip the two remaining edges
+
+    std::cout << "Count after edges: " << count << "   nFiltered after edges: " << nFiltered << std::endl;
+
+    // Pick the functions for the second direction of the faces 1,2,3
+    count += kFacet * (kFacet - 1); // Skip the first face
+    for (int i = 0; i < 3; i++) {
+      count += kFacet * (kFacet - 1)/2; // Skip the first direction of the face
+      for (int j = 0; j < kFacet * (kFacet - 1)/2; j++) {
+        filteredIndices[nFiltered] = count;
+        nFiltered++;
+        count++;
+      }
+    }
+
+    // Pick the functions of the first direction of the faces 6
+    count += kFacet * (kFacet - 1) * (kFacet -2)/3; // Skipe the first two directions of the volume
+    for (int j = 0; j < kFacet * (kFacet - 1) * (kFacet - 2) / 6; j++) {
+      filteredIndices[nFiltered] = count;
+      nFiltered++;
+      count++;
+    }
+
   } else {
     std::cout << "Not implemented yet" << std::endl;
     return;
   }
+
+  // Print the filtered indices
   std::cout << "Filtered indices: ";
   for (int i = 0; i < nFiltered; i++) {
     std::cout << filteredIndices[i] << " ";
