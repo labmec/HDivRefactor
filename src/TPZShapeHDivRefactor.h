@@ -37,5 +37,7 @@ struct TPZShapeHDivRefactor : public TPZShapeHDiv<TSHAPE>, TPZShapeHCurlNoGrads<
 
     static int NShapeF(const TPZShapeData &shapedata);
 
+    static void FilterHDivStdBasis(TPZVec<int> &filteredIndices, int kFacet);
+
     static void CheckH1ConnectOrder(const TPZVec<int> &connectorders, TPZVec<int> &H1Orders);
 };

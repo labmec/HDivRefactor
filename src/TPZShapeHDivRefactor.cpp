@@ -136,6 +136,19 @@ void TPZShapeHDivRefactor<TSHAPE>::Shape(const TPZVec<REAL> &pt, TPZShapeData &d
     constexpr int dim = TSHAPE::Dimension;
     constexpr int nfacets = TSHAPE::NFacets;
     const int nedges = TSHAPE::NumSides(1);
+    TPZVec<int> filteredIndices;
+    int order = data.fHDiv.fConnectOrders[0]; // change to adapt as it goes
+    TPZShapeHDivRefactor<TSHAPE>::FilterHDivStdBasis(filteredIndices, order);
+
+    for (int i = 0; i < filteredIndices.size(); i++)
+    {
+        int entry = filteredIndices[i];
+        if (filteredIndices[i] == -1)
+        {
+            std::cout << "Error: Filtered index not set for shape function " << i << std::endl;
+            DebugStop();
+        }
+    }
 
     if (phi.Rows() != dim || phi.Cols() != data.fHDiv.fSDVecShapeIndex.size())
     {
@@ -182,7 +195,7 @@ void TPZShapeHDivRefactor<TSHAPE>::Shape(const TPZVec<REAL> &pt, TPZShapeData &d
             }
         }
 
-        // Internal Kernel functions 
+        // Internal Kernel functions
         for (int i = countKernel; i < nshape; i++)
         {
             phi(0, count) = -data.fH1.fDPhi(1, countKernel);
@@ -191,21 +204,21 @@ void TPZShapeHDivRefactor<TSHAPE>::Shape(const TPZVec<REAL> &pt, TPZShapeData &d
             countKernel++;
         }
 
-        // Remaining internal functions - We need to filter!
-        const int nfacetfunc = count;
-        for (int i = nfacetfunc; i < data.fHDiv.fSDVecShapeIndex.size(); i++)
+        // Remaining internal functions - filtered from std HDiv
+        for (int i = 0; i < filteredIndices.size(); i++)
         {
-            auto it = data.fHDiv.fSDVecShapeIndex[i];
+            auto it = data.fHDiv.fSDVecShapeIndex[filteredIndices[i]];
             int vecindex = it.first;
             int scalindex = it.second;
-            divphi(i, 0) = 0.;
+            divphi(count, 0) = 0.;
             for (int d = 0; d < dim; d++)
             {
-                phi(d, i) = data.fH1.fPhi(scalindex, 0) * data.fHDiv.fMasterDirections(d, vecindex);
-                divphi(i, 0) += data.fH1.fDPhi(d, scalindex) * data.fHDiv.fMasterDirections(d, vecindex);
+                phi(d, count) = data.fH1.fPhi(scalindex, 0) * data.fHDiv.fMasterDirections(d, vecindex);
+                divphi(count, 0) += data.fH1.fDPhi(d, scalindex) * data.fHDiv.fMasterDirections(d, vecindex);
             }
             count++;
         }
+        // std::cout << "Final count: " << count << std::endl;
     }
     // For dim = 3, the facet functions come from HCurlNoGrads, while the internal functions are computed according to standard HDiv
     else if constexpr (dim == 3)
@@ -245,19 +258,30 @@ void TPZShapeHDivRefactor<TSHAPE>::Shape(const TPZVec<REAL> &pt, TPZShapeData &d
                 count++;
             }
         }
-        // Internal functions
-        const int nfacetfunc = count;
-        TPZShapeH1<TSHAPE>::Shape(pt, data, data.fH1.fPhi, data.fH1.fDPhi);
-        for (int i = nfacetfunc; i < data.fHDiv.fSDVecShapeIndex.size(); i++)
+
+        // Internal Functions - HDivKernel
+        for (int i = 0; i < data.fHCurl.fNumConnectShape[TSHAPE::NSides - TSHAPE::NCornerNodes - 1]; i++)
         {
-            auto it = data.fHDiv.fSDVecShapeIndex[i];
+            for (auto d = 0; d < dim; d++)
+            {
+                phi(d, count) = curlPhiAux(d, countKernel);
+            }
+            countKernel++;
+            count++;
+        }
+
+        // Internal functions - Filtered from HDiv std
+        TPZShapeH1<TSHAPE>::Shape(pt, data, data.fH1.fPhi, data.fH1.fDPhi);
+        for (int i = 0; i < filteredIndices.size(); i++)
+        {
+            auto it = data.fHDiv.fSDVecShapeIndex[filteredIndices[i]];
             int vecindex = it.first;
             int scalindex = it.second;
-            divphi(i, 0) = 0.;
+            divphi(count, 0) = 0.;
             for (int d = 0; d < dim; d++)
             {
-                phi(d, i) = data.fH1.fPhi(scalindex, 0) * data.fHDiv.fMasterDirections(d, vecindex);
-                divphi(i, 0) += data.fH1.fDPhi(d, scalindex) * data.fHDiv.fMasterDirections(d, vecindex);
+                phi(d, count) = data.fH1.fPhi(scalindex, 0) * data.fHDiv.fMasterDirections(d, vecindex);
+                divphi(count, 0) += data.fH1.fDPhi(d, scalindex) * data.fHDiv.fMasterDirections(d, vecindex);
             }
             count++;
         }
@@ -504,6 +528,13 @@ void TPZShapeHDivRefactor<TSHAPE>::CheckH1ConnectOrder(const TPZVec<int> &connec
         {
             H1Orders[i] = H1HDivOrders[i];
         }
+
+        // In triangles we need to increase the internal order to have enough
+        // functions to compute the curls
+        if (TSHAPE::Type() == ETriangle)
+        {
+            H1Orders[nHDivcon - 1] = maxorder + 1;
+        }
     }
     else if constexpr (dim == 3)
     {
@@ -532,6 +563,175 @@ void TPZShapeHDivRefactor<TSHAPE>::CheckH1ConnectOrder(const TPZVec<int> &connec
             H1Orders[i] = std::max(H1HDivOrders[i], H1HCurlOrders[i]);
         }
     }
+}
+
+template <class TSHAPE>
+void TPZShapeHDivRefactor<TSHAPE>::FilterHDivStdBasis(TPZVec<int> &filteredIndices, int kFacet) {
+  int nFiltered = 0;
+  int count = 0;
+  if (TSHAPE::Type() == ECube) {
+    filteredIndices.Resize((kFacet+1)*(kFacet+1)*(kFacet+1)-1);
+    filteredIndices.Fill(-1);
+    count = TSHAPE::NFacets * (kFacet + 1) * (kFacet + 1); // Skip trace functions
+    // std::cout << "Count after trace functions: " << count << std::endl;
+
+    // Pick edge functions of the first 8 edges, skipping  the 4th one.
+    for (int i = 0; i < 8; i++) {
+      if (i == 3) {
+        count += kFacet;
+        continue;
+      }
+      for (int j = 0; j < kFacet; j++) {
+        filteredIndices[nFiltered] = count;
+        nFiltered++;
+        count++;
+      }
+    }
+
+    count += 4 * kFacet; // Skip the four remaining edges
+
+    // std::cout << "Count after edges: " << count << "   nFiltered after edges: " << nFiltered << std::endl;
+
+    // Pick the functions for the second direction of the faces 1,2,3, and 4
+    count += 2 * kFacet * (kFacet - 1); // Skip the first face
+    for (int i = 0; i < 4; i++) {
+      count += kFacet * (kFacet - 1); // Skip the first direction of the face
+      for (int j = 0; j < kFacet * (kFacet - 1); j++) {
+        filteredIndices[nFiltered] = count;
+        nFiltered++;
+        count++;
+      }
+    }
+
+    // Pick the functions of the first direction of the faces 6
+    for (int j = 0; j < kFacet * (kFacet - 1); j++) {
+      filteredIndices[nFiltered] = count;
+      nFiltered++;
+      count++;
+    }
+
+    count += kFacet * (kFacet - 1); // Skip the second direction of the face 6
+
+    // std::cout << "Count after faces: " << count << "  nFiltered after faces: " << nFiltered << std::endl;
+
+    // Pick the internal functions in the third direction
+    count += 2 * (kFacet * (kFacet - 1) * (kFacet - 1));
+    for (int j = 0; j < kFacet * (kFacet - 1) * (kFacet - 1); j++) {
+      filteredIndices[nFiltered] = count;
+      nFiltered++;
+      count++;
+    }
+
+  } else if (TSHAPE::Type() == EQuadrilateral) {
+    filteredIndices.Resize((kFacet+1)*(kFacet+1)-1);
+    filteredIndices.Fill(-1);
+    count = TSHAPE::NFacets * (kFacet + 1); // Skip trace functions
+    // std::cout << "Count after trace functions: " << count << std::endl;
+
+    // Pick edge functions of the first 3 edges
+    for (int i = 0; i < 3; i++) {
+      for (int j = 0; j < kFacet; j++) {
+        filteredIndices[nFiltered] = count;
+        nFiltered++;
+        count++;
+      }
+    }
+
+    count += kFacet; // Skip the final edge
+
+    // std::cout << "Count after edges: " << count << "   nFiltered after edges: " << nFiltered << std::endl;
+
+    // Pick the functions of the first direction of the face
+    for (int j = 0; j < kFacet * (kFacet - 1); j++) {
+      filteredIndices[nFiltered] = count;
+      nFiltered++;
+      count++;
+    }
+
+    // std::cout << "Count after faces: " << count << "  nFiltered after faces: " << nFiltered << std::endl;
+
+  } else if (TSHAPE::Type() == ETriangle) {
+    filteredIndices.Resize((kFacet+1)*(kFacet+2)/2-1);
+    filteredIndices.Fill(-1);
+    count = TSHAPE::NFacets * (kFacet + 1); // Skip trace functions
+    // std::cout << "Count after trace functions: " << count << std::endl;
+
+    // Pick edge functions of the first 2 edges
+    for (int i = 0; i < 2; i++) {
+      for (int j = 0; j < kFacet; j++) {
+        filteredIndices[nFiltered] = count;
+        nFiltered++;
+        count++;
+      }
+    }
+
+    count += kFacet; // Skip the final edge
+
+    // std::cout << "Count after edges: " << count << "   nFiltered after edges: " << nFiltered << std::endl;
+
+    // Pick the functions of the first direction of the face
+    for (int j = 0; j < kFacet * (kFacet - 1) / 2; j++) {
+      filteredIndices[nFiltered] = count;
+      nFiltered++;
+      count++;
+    }
+
+    // std::cout << "Count after faces: " << count << "  nFiltered after faces: " << nFiltered << std::endl;
+
+  } else if (TSHAPE::Type() == ETetraedro) {
+    filteredIndices.Resize((kFacet+3)*(kFacet+2)*(kFacet+1)/6-1);
+    filteredIndices.Fill(-1);
+    count = TSHAPE::NFacets * (kFacet + 2) * (kFacet + 1) / 2; // Skip trace functions
+
+    // std::cout << "Count after trace functions: " << count << std::endl;
+
+    // Pick edge functions of the first 3 edges, skipping  the 2th one.
+    for (int i = 0; i < 4; i++) {
+      if (i == 2) {
+        count += kFacet;
+        continue;
+      }
+      for (int j = 0; j < kFacet; j++) {
+        filteredIndices[nFiltered] = count;
+        nFiltered++;
+        count++;
+      }
+    }
+
+    count += 2*kFacet; // Skip the two remaining edges
+
+    // std::cout << "Count after edges: " << count << "   nFiltered after edges: " << nFiltered << std::endl;
+
+    // Pick the functions for the second direction of the faces 1,2,3
+    count += kFacet * (kFacet - 1); // Skip the first face
+    for (int i = 0; i < 3; i++) {
+      count += kFacet * (kFacet - 1)/2; // Skip the first direction of the face
+      for (int j = 0; j < kFacet * (kFacet - 1)/2; j++) {
+        filteredIndices[nFiltered] = count;
+        nFiltered++;
+        count++;
+      }
+    }
+
+    // Pick the functions of the first direction of the faces 6
+    count += kFacet * (kFacet - 1) * (kFacet -2)/3; // Skipe the first two directions of the volume
+    for (int j = 0; j < kFacet * (kFacet - 1) * (kFacet - 2) / 6; j++) {
+      filteredIndices[nFiltered] = count;
+      nFiltered++;
+      count++;
+    }
+
+  } else {
+    std::cout << "Not implemented yet" << std::endl;
+    return;
+  }
+
+  // Print the filtered indices
+//   std::cout << "Filtered indices: ";
+//   for (int i = 0; i < nFiltered; i++) {
+//     std::cout << filteredIndices[i] << " ";
+//   }
+//   std::cout << std::endl;
 }
 
 template struct TPZShapeHDivRefactor<pzshape::TPZShapeLinear>;

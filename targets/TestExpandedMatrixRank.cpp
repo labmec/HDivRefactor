@@ -51,6 +51,9 @@
 #include "tpzpermutation.h"
 #include "tpztriangle.h"
 
+// Internal stuff
+#include "TPZShapeHDivRefactor.h"
+
 template <class TSHAPE>
 void TestHDivOptimized(int kFacet);
 
@@ -58,16 +61,17 @@ template <class TSHAPE>
 void filterEquations(TPZVec<int> &filteredIndices, int kFacet);
 
 int main(int argc, char **argv) {
-  int kFacet = 2;
-  TestHDivOptimized<pzshape::TPZShapeQuad>(kFacet);
-  // TestHDivOptimized<pzshape::TPZShapeCube>(kFacet);
-  // TestHDivOptimized<pzshape::TPZShapeTriang>(kFacet);
-  // TestHDivOptimized<pzshape::TPZShapeTetra>(kFacet);
+  for (int kFacet = 1; kFacet <= 3; kFacet++) {
+    TestHDivOptimized<pzshape::TPZShapeQuad>(kFacet);
+    TestHDivOptimized<pzshape::TPZShapeCube>(kFacet);
+    TestHDivOptimized<pzshape::TPZShapeTriang>(kFacet);
+    TestHDivOptimized<pzshape::TPZShapeTetra>(kFacet);
+  }
 }
 
 template <class TSHAPE>
 void TestHDivOptimized(int kFacet) {
-  TPZMaterialDataT<REAL> dataHDiv, dataHDivOptimized, dataHDivConst, dataH1;
+  TPZMaterialDataT<REAL> dataHDiv, dataHDivOptimized, dataHDivRefactor, dataHDivConst, dataH1;
   TPZManVector<int64_t, 27> ids(TSHAPE::NCornerNodes, 0);
   for (int i = 0; i < TSHAPE::NCornerNodes; i++) {
     ids[i] = i;
@@ -77,106 +81,104 @@ void TestHDivOptimized(int kFacet) {
   TPZManVector<int, 27> h1orders(TSHAPE::NSides - TSHAPE::NCornerNodes, kFacet);
   TPZShapeHDiv<TSHAPE> hdiv_std;
   TPZShapeHDivOptimized<TSHAPE> hdiv_opt;
+  TPZShapeHDivRefactor<TSHAPE> hdiv_rft;
   TPZShapeHDivConstant<TSHAPE> hdiv_const;
   TPZShapeH1<TSHAPE> h1;
 
   hdiv_std.Initialize(ids, orders, sideorient, dataHDiv);
+  hdiv_rft.Initialize(ids, orders, sideorient, dataHDivRefactor);
   hdiv_opt.Initialize(ids, orders, sideorient, dataHDivOptimized);
   hdiv_const.Initialize(ids, orders, sideorient, dataHDivConst);
   h1.Initialize(ids, h1orders, dataH1);
   int nshape_std = hdiv_std.NShapeF(dataHDiv);
-  int nshapeInt_std = hdiv_std.NConnectShapeF(TSHAPE::NFacets, dataHDiv);
+  int nshape_rft = hdiv_rft.NShapeF(dataHDivRefactor);
   int nshape_opt = hdiv_opt.NShapeF(dataHDivOptimized);
-  int nshape_cust = nshape_std;
+  int nshapeInt_std = hdiv_std.NConnectShapeF(TSHAPE::NFacets, dataHDiv);
+  int nshape_const = hdiv_const.NHDivShapeF(dataHDivConst);
   int nshape_h1 = dataH1.fH1.fPhi.Rows();
 
-  TPZVec<int> filteredIndices;
-  filterEquations<TSHAPE>(filteredIndices, kFacet);
-  int nFiltered = filteredIndices.size();
-  if (nFiltered != nshape_h1-1) {
-    std::cout << "Warning: Number of filtered indices (" << nFiltered << ") does not match expected (" << nshape_h1-1 << ")" << std::endl;
-    DebugStop();
-  }
-
   constexpr int dim = TSHAPE::Dimension;
+  int nFacets = TSHAPE::NFacets;
   TPZFMatrix<REAL> phi_std(dim, nshape_std, 0.);
-  TPZFMatrix<REAL> phi_cust(dim, nshape_cust, 0.);
   TPZFNMatrix<60, REAL> div_std(nshape_std, 1);
-  TPZFNMatrix<60, REAL> div_filtered(nFiltered, 1);
+  TPZFMatrix<REAL> phi_rft(dim, nshape_rft, 0.);
+  TPZFNMatrix<60, REAL> div_rft(nshape_rft, 1);
   TPZFMatrix<REAL> phi_h1(nshape_h1, 1, 0.);
-  TPZFMatrix<REAL> phi_h1_filtered(nshape_h1-1, 1, 0.);
   TPZFMatrix<REAL> dphi_h1(dim, nshape_h1, 0.);
   typename TSHAPE::IntruleType intrule(kFacet+6);
   int nintpoints = intrule.NPoints();
   TPZManVector<REAL, 3> point(dim, 0.);
 
-  TPZFMatrix<REAL> Mstd(nshape_std, nshape_std, 0.);
-  TPZFMatrix<REAL> Mcust(nshape_cust, nshape_cust, 0.);
-  TPZFMatrix<REAL> Mstd_cust(nshape_std, nshape_cust, 0.);
-  TPZFMatrix<REAL> Mdiv(nshape_cust, nshape_cust, 0.);
+  TPZFMatrix<REAL> Mdiv_rft(nshape_rft, nshape_rft, 0.);
+  TPZFMatrix<REAL> Mdiv_rft_h1(nshape_rft, nshape_h1, 0.);
   TPZFMatrix<REAL> Mh1(nshape_h1, nshape_h1, 0.);
-  TPZFMatrix<REAL> Mdiv_h1(nshape_cust, nshape_h1, 0.);
 
-  TPZFMatrix<REAL> Mdiv_filtered(nFiltered, nFiltered, 0.);
-  TPZFMatrix<REAL> Mdiv_filtered_h1(nFiltered, nshape_h1, 0.);
-  TPZFMatrix<REAL> Mh1_filtered(nshape_h1-1, nshape_h1-1, 0.);
+  TPZFMatrix<REAL> Mphi_std(nshape_std, nshape_std, 0.);
+  TPZFMatrix<REAL> Mphi_rft(nshape_rft, nshape_rft, 0.);
+  TPZFMatrix<REAL> Mphi_std_rft(nshape_std, nshape_rft, 0.);
 
   for (int ip = 0; ip < nintpoints; ip++) {
     REAL weight;
     intrule.Point(ip, point, weight);
     hdiv_std.Shape(point, dataHDiv, phi_std, div_std);
+    hdiv_rft.Shape(point, dataHDivRefactor, phi_rft, div_rft);
     h1.Shape(point, dataH1, phi_h1, dphi_h1);
 
-    // Filtered functions
-
-    for (int i = 0; i < nFiltered; i++) {
-      div_filtered(i, 0) = div_std(filteredIndices[i], 0);
-    }
-
-    for (int i =1; i < nshape_h1; i++) {
-      phi_h1_filtered(i-1,0) = phi_h1(i,0);
+    {
+      std::ofstream out("shapeFunctionsRefactor.txt");
+      phi_rft.Print("GKRefactor = ", out, EMathematicaInput);
     }
 
     // Matrices to check deRham compatibility
-    Mdiv.AddContribution(0, 0, div_std, 0, div_std, 1, weight); // div x div
+    Mdiv_rft.AddContribution(0, 0, div_rft, 0, div_rft, 1, weight); // div x div
     Mh1.AddContribution(0, 0, phi_h1, 0, phi_h1, 1, weight); // L2 x L2
-    Mdiv_h1.AddContribution(0, 0, div_std, 0, phi_h1, 1, weight); // div x L2
+    Mdiv_rft_h1.AddContribution(0, 0, div_rft, 0, phi_h1, 1, weight); // div x L2
 
-    // Matrices to check deRham compatibility of the filtered functions
-    Mdiv_filtered.AddContribution(0, 0, div_filtered, 0, div_filtered, 1, weight); // div x div
-    Mdiv_filtered_h1.AddContribution(0, 0, div_filtered, 0, phi_h1_filtered, 1, weight); // div x L2
-    Mh1_filtered.AddContribution(0, 0, phi_h1_filtered, 0, phi_h1_filtered, 1, weight); // L2 x L2
+    // Matrices to check polynomial span of the refactor functions
+    Mphi_std.AddContribution(0, 0, phi_std, 1, phi_std, 0, weight); // std x std
+    Mphi_rft.AddContribution(0, 0, phi_rft, 1, phi_rft, 0, weight); // rft x rft
+    Mphi_std_rft.AddContribution(0, 0, phi_std, 1, phi_rft, 0, weight); // std x rft
   }
 
   {
-    std::ofstream out("divergenceMatrixFull.txt");
-    Mdiv.Print("GK = ", out, EMathematicaInput);
+    std::ofstream out("divergenceMatrixRefactor.txt");
+    Mdiv_rft.Print("GKRefactor = ", out, EMathematicaInput);
   }
 
   {
-    std::ofstream out("divergenceMatrixFiltered.txt");
-    Mdiv_filtered.Print("GKFilt = ", out, EMathematicaInput);
+    std::ofstream out("L2MatrixRefactor.txt");
+    Mphi_rft.Print("GK = ", out, EMathematicaInput);
   }
   
-  // TODO: Check with gi. Maybe cleaner way to do it
-  TPZFMatrix<REAL> Mdiv_h1_t;
-  Mdiv_h1.Transpose(&Mdiv_h1_t);
-  Mh1.SolveDirect(Mdiv_h1_t, ELDLt); 
-  TPZFMatrix<REAL> Res1 = Mdiv - Mdiv_h1 * Mdiv_h1_t;
+  // Span test
+  TPZFMatrix<REAL> Mphi_std_rft_t;
+  Mphi_std_rft.Transpose(&Mphi_std_rft_t);
+  Mphi_rft.SolveDirect(Mphi_std_rft_t, ELU); 
+  TPZFMatrix<REAL> Res1 = Mphi_std - Mphi_std_rft * Mphi_std_rft_t;
 
-  TPZFMatrix<REAL> Mdiv_filtered_h1_t;
-  Mdiv_filtered_h1.Transpose(&Mdiv_filtered_h1_t);
-  Mh1_filtered.SolveDirect(Mdiv_filtered_h1_t, ELDLt);
-  TPZFMatrix<REAL> Res2 = Mdiv_filtered - Mdiv_filtered_h1 * Mdiv_filtered_h1_t;
+  // de Rham test
+  TPZFMatrix<REAL> Mdiv_rft_h1_t;
+  Mdiv_rft_h1.Transpose(&Mdiv_rft_h1_t);
+  Mh1.SolveDirect(Mdiv_rft_h1_t, ELDLt); 
+  TPZFMatrix<REAL> Res2 = Mdiv_rft - Mdiv_rft_h1 * Mdiv_rft_h1_t;
 
   std::cout << "\n------------------------------" << std::endl;
   std::cout << "Calling the test for " << typeid(TSHAPE).name() << " with order " << kFacet << std::endl;
   std::cout << "\nNumber of shape functions: " << nshape_std << std::endl;
   std::cout << "Number of internal shape functions: " << nshapeInt_std << std::endl;
-  std::cout << "Number of non-null divergence shape functions: " << filteredIndices.size() << std::endl;
-  std::cout << "\nIs de Rham compatible? " << Res1.MatrixNorm(1, 10, 1.e-10) << std::endl;
-  std::cout << "Is de Rham compatible for the filtered functions? " << Res2.MatrixNorm(1, 10, 1.e-10) << std::endl;
+  std::cout << "\nDoes it expands the same polynomial space? " << Res1.MatrixNorm(1, 10, 1.e-10) << std::endl;
+  std::cout << "Is de Rham compatible? " << Res2.MatrixNorm(1, 10, 1.e-10) << std::endl;
   std::cout << "------------------------------" << std::endl;
+
+  if (Res1.MatrixNorm(1, 10, 1.e-10) > 1.e-12) {
+    std::cout << "\nWarning: Refactor HDiv does not seem to be expanding the same polynomial space! Norm of the residual: " << Res1.MatrixNorm(1, 10, 1.e-10) << std::endl;
+    // DebugStop();
+  }
+
+  if (Res2.MatrixNorm(1, 10, 1.e-10) > 1.e-12) {
+    std::cout << "\nWarning: Refactor HDiv does not seem to be de Rham compatible! Norm of the residual: " << Res2.MatrixNorm(1, 10, 1.e-10) << std::endl;
+    // DebugStop();
+  }
 }
 
 template <class TSHAPE>
