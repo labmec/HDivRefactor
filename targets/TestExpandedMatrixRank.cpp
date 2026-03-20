@@ -15,6 +15,7 @@
 #include "TPZShapeHDiv.h"
 #include "TPZShapeHDivConstant.h"
 #include "TPZShapeHDivOptimized.h"
+#include "TPZShapeHCurl.h"
 #include "TPZVTKGeoMesh.h"
 #include "pzbuildmultiphysicsmesh.h"
 #include "pzcmesh.h"
@@ -58,6 +59,9 @@ template <class TSHAPE>
 void TestHDivOptimized(int kFacet);
 
 template <class TSHAPE>
+void TestPrism(int kFacet);
+
+template <class TSHAPE>
 void filterEquations(TPZVec<int> &filteredIndices, int kFacet);
 
 int main(int argc, char **argv) {
@@ -67,6 +71,8 @@ int main(int argc, char **argv) {
     TestHDivOptimized<pzshape::TPZShapeTriang>(kFacet);
     TestHDivOptimized<pzshape::TPZShapeTetra>(kFacet);
   }
+
+  // TestPrism<pzshape::TPZShapePrism>(1);
 }
 
 template <class TSHAPE>
@@ -347,4 +353,25 @@ void filterEquations(TPZVec<int> &filteredIndices, int kFacet) {
     std::cout << filteredIndices[i] << " ";
   }
   std::cout << std::endl;
+}
+
+template <class TSHAPE>
+void TestPrism(int kFacet) {
+  TPZMaterialDataT<REAL> dataHDiv, dataHDivOptimized, dataHDivConst, dataHCurl;
+  TPZManVector<int64_t, 27> ids(TSHAPE::NCornerNodes, 0);
+  for (int i = 0; i < TSHAPE::NCornerNodes; i++) {
+    ids[i] = i;
+  }
+  TPZManVector<int, 27> sideorient(TSHAPE::NFacets, 1);
+  TPZManVector<int, 27> orders(TSHAPE::NFacets + 1, kFacet);
+  TPZManVector<int, 27> ordersHcurl(TSHAPE::NSides-TSHAPE::NCornerNodes, kFacet);
+  TPZShapeHDiv<TSHAPE> hdiv_std;
+  TPZShapeHDivOptimized<TSHAPE> hdiv_opt;
+  TPZShapeHDivConstant<TSHAPE> hdiv_const;
+  TPZShapeHCurl<TSHAPE> hdiv_curl;
+
+  hdiv_std.Initialize(ids, orders, sideorient, dataHDiv); // Ok
+  hdiv_curl.Initialize(ids, ordersHcurl, dataHCurl); // Ok
+  hdiv_const.Initialize(ids, orders, sideorient, dataHDivConst); // HDivNoGrads missing for prism
+  hdiv_opt.Initialize(ids, orders, sideorient, dataHDivOptimized);
 }

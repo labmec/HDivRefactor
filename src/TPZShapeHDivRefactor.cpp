@@ -168,7 +168,8 @@ void TPZShapeHDivRefactor<TSHAPE>::Shape(const TPZVec<REAL> &pt, TPZShapeData &d
     RT0div.Fill(0.);
     TSHAPE::ComputeConstantHDiv(pt, RT0phi, RT0div);
 
-    // For dim = 2, we use the gradient of H1 functions to compute the facet HDiv functions, while the internal functions come from the standard HDiv
+    // For dim = 2, we use the gradient of H1 functions to generate divergence free functions
+    // The non-vanishing divergence functions are obtained by filtering the standard HDiv shape functions
     if constexpr (dim == 2)
     {
         int nshape = data.fH1.fPhi.Rows();
@@ -185,7 +186,7 @@ void TPZShapeHDivRefactor<TSHAPE>::Shape(const TPZVec<REAL> &pt, TPZShapeData &d
             divphi(count, 0) = RT0div[i] * data.fHDiv.fSideOrient[i];
             count++;
 
-            // Kernel Hdiv
+            // Boundary kernel functions (div v = 0, v.n is a polynomial in the boundary)
             for (int j = 1; j < data.fHDiv.fNumConnectShape[i]; j++)
             {
                 phi(0, count) = -data.fH1.fDPhi(1, countKernel);
@@ -195,7 +196,7 @@ void TPZShapeHDivRefactor<TSHAPE>::Shape(const TPZVec<REAL> &pt, TPZShapeData &d
             }
         }
 
-        // Internal Kernel functions
+        // Internal Kernel functions (div v = 0, v.n = 0 in the boundary)
         for (int i = countKernel; i < nshape; i++)
         {
             phi(0, count) = -data.fH1.fDPhi(1, countKernel);
@@ -204,7 +205,7 @@ void TPZShapeHDivRefactor<TSHAPE>::Shape(const TPZVec<REAL> &pt, TPZShapeData &d
             countKernel++;
         }
 
-        // Remaining internal functions - filtered from std HDiv
+        // Remaining internal functions (v.n = 0, div v is a polynomial)
         for (int i = 0; i < filteredIndices.size(); i++)
         {
             auto it = data.fHDiv.fSDVecShapeIndex[filteredIndices[i]];
@@ -218,7 +219,6 @@ void TPZShapeHDivRefactor<TSHAPE>::Shape(const TPZVec<REAL> &pt, TPZShapeData &d
             }
             count++;
         }
-        // std::cout << "Final count: " << count << std::endl;
     }
     // For dim = 3, the facet functions come from HCurlNoGrads, while the internal functions are computed according to standard HDiv
     else if constexpr (dim == 3)
