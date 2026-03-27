@@ -51,6 +51,7 @@
 #include "tpzintpoints.h"
 #include "tpzpermutation.h"
 #include "tpztriangle.h"
+#include "TPZShapeHCurlNoGrads.h"
 
 // Internal stuff
 #include "TPZShapeHDivRefactor.h"
@@ -58,19 +59,12 @@
 template <class TSHAPE>
 void TestHDivOptimized(int kFacet);
 
-template <class TSHAPE>
-void TestPrism(int kFacet);
-
-template <class TSHAPE>
-void filterEquations(TPZVec<int> &filteredIndices, int kFacet);
-
 int main(int argc, char **argv) {
   for (int kFacet = 1; kFacet <= 3; kFacet++) {
-    // TestHDivOptimized<pzshape::TPZShapeQuad>(kFacet);
-    // TestHDivOptimized<pzshape::TPZShapeCube>(kFacet);
-    // TestHDivOptimized<pzshape::TPZShapeTriang>(kFacet);
-    // TestHDivOptimized<pzshape::TPZShapeTetra>(kFacet);
-    TestPrism<pzshape::TPZShapePrism>(kFacet);
+    TestHDivOptimized<pzshape::TPZShapeQuad>(kFacet);
+    TestHDivOptimized<pzshape::TPZShapeCube>(kFacet);
+    TestHDivOptimized<pzshape::TPZShapeTriang>(kFacet);
+    TestHDivOptimized<pzshape::TPZShapeTetra>(kFacet);
   }
 }
 
@@ -184,31 +178,4 @@ void TestHDivOptimized(int kFacet) {
     std::cout << "\nWarning: Refactor HDiv does not seem to be de Rham compatible! Norm of the residual: " << Res2.MatrixNorm(1, 10, 1.e-10) << std::endl;
     // DebugStop();
   }
-}
-
-template <class TSHAPE>
-void TestPrism(int kFacet) {
-  TPZMaterialDataT<REAL> dataHDiv, dataHDivOptimized, dataHDivConst, dataHCurl;
-  TPZManVector<int64_t, 27> ids(TSHAPE::NCornerNodes, 0);
-  for (int i = 0; i < TSHAPE::NCornerNodes; i++) {
-    ids[i] = i;
-  }
-  TPZManVector<int, 27> sideorient(TSHAPE::NFacets, 1);
-  TPZManVector<int, 27> orders(TSHAPE::NFacets + 1, kFacet);
-  TPZManVector<int, 27> ordersHcurl(TSHAPE::NSides-TSHAPE::NCornerNodes, kFacet);
-  TPZShapeHDiv<TSHAPE> hdiv_std;
-  TPZShapeHDivOptimized<TSHAPE> hdiv_opt;
-  TPZShapeHDivConstant<TSHAPE> hdiv_const;
-  TPZShapeHCurl<TSHAPE> hdiv_curl;
-
-  hdiv_std.Initialize(ids, orders, sideorient, dataHDiv); // Ok
-  hdiv_curl.Initialize(ids, ordersHcurl, dataHCurl); // Ok
-  int nshape_curl = hdiv_curl.NHCurlShapeF(dataHCurl);
-  int nc = dataHCurl.fHCurl.fNumConnectShape.size();
-  for(int ic = 0; ic<nc; ic++) {
-    std::cout << dataHCurl.fHCurl.fNumConnectShape[ic] << " ";
-  }
-  std::cout << "Number of HCurl shape functions: " << nshape_curl << std::endl;
-  //hdiv_const.Initialize(ids, orders, sideorient, dataHDivConst); // HDivNoGrads missing for prism
-  //hdiv_opt.Initialize(ids, orders, sideorient, dataHDivOptimized);
 }

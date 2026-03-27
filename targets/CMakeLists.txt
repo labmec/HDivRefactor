@@ -1,2 +1,8 @@
 add_executable(TestExpandedMatrixRank TestExpandedMatrixRank.cpp)
 target_link_libraries(TestExpandedMatrixRank PRIVATE libproject)
+
+add_executable(ConvPrism ConvergenceH1Prism.cpp)
+target_link_libraries(ConvPrism PRIVATE libproject)
+
+add_executable(HCurlCount FunctionCountingHcurl.cpp)
+target_link_libraries(HCurlCount PRIVATE libproject)
